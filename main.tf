@@ -7,11 +7,15 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.80"
+      version = "~> 3.99"
     }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.4"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.9"
     }
   }
 }
@@ -26,6 +30,9 @@ provider "azurerm" {
       prevent_deletion_if_contains_resources = false
     }
   }
+  
+  storage_use_azuread = true
+  skip_provider_registration = true
 }
 
 #============================================================================
@@ -38,13 +45,6 @@ data "azurerm_resource_group" "main" {
   name = var.resource_group_name
 }
 
-# Generate unique string for storage account naming
-resource "random_string" "unique" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
 #============================================================================
 # LOCAL VALUES
 #============================================================================
@@ -55,9 +55,6 @@ locals {
     environment = var.environment
     project     = "bicep-to-terraform-demo"
   }
-  
-  # Ensure storage account name is globally unique and follows naming rules
-  storage_account_name = "${var.storage_account_name}${random_string.unique.result}"
 }
 
 #============================================================================
@@ -72,7 +69,6 @@ module "log_analytics_workspace" {
   resource_group_name = data.azurerm_resource_group.main.name
   sku                = var.log_analytics_workspace_sku
   retention_in_days  = var.log_analytics_retention_in_days
-  diagnostics_enabled = var.diagnostics_enabled
   tags               = local.common_tags
 }
 
@@ -97,14 +93,31 @@ module "virtual_network" {
 module "storage_account" {
   source = "./modules/storage_account"
 
-  storage_account_name         = local.storage_account_name
+  storage_account_name        = var.storage_account_name
   location                    = var.location
   resource_group_name         = data.azurerm_resource_group.main.name
   allow_blob_public_access    = false
-  public_network_access       = false
-  diagnostics_enabled         = var.diagnostics_enabled
-  log_analytics_workspace_id  = module.log_analytics_workspace.workspace_id
+  public_network_access       = true
   tags                        = local.common_tags
+  enable_static_website       = true
+}
+
+#============================================================================
+# STORAGE ACCOUNT ROLE ASSIGNMENTS
+#============================================================================
+
+# Grant current user Storage Table Data Contributor role
+resource "azurerm_role_assignment" "current_user_storage_table" {
+  scope                = module.storage_account.storage_account_id
+  role_definition_name = "Storage Table Data Contributor"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
+# Add time delay to allow Storage RBAC propagation
+resource "time_sleep" "storage_rbac_propagation" {
+  depends_on = [azurerm_role_assignment.current_user_storage_table]
+  
+  create_duration = "120s"
 }
 
 #============================================================================
@@ -117,7 +130,10 @@ module "storage_table" {
   storage_account_name = module.storage_account.storage_account_name
   table_name          = var.storage_table_name
 
-  depends_on = [module.storage_account]
+  depends_on = [
+    module.storage_account,
+    time_sleep.storage_rbac_propagation
+  ]
 }
 
 #============================================================================
@@ -135,37 +151,67 @@ module "key_vault" {
   soft_delete_enabled                   = var.key_vault_soft_delete_enabled
   purge_protection_enabled              = var.key_vault_purge_protection_enabled
   enabled_for_template_deployment       = var.key_vault_enabled_for_template_deployment
-  diagnostics_enabled                   = var.diagnostics_enabled
-  log_analytics_workspace_id            = module.log_analytics_workspace.workspace_id
   tags                                  = local.common_tags
+}
+
+#============================================================================
+# KEY VAULT ROLE ASSIGNMENTS
+#============================================================================
+
+# Grant current user Key Vault Secrets Officer role for managing secrets
+resource "azurerm_role_assignment" "current_user_kv_secrets_officer" {
+  scope                = module.key_vault.key_vault_id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
+# Grant App Service managed identity Key Vault Secrets User role
+resource "azurerm_role_assignment" "app_service_kv_secrets_user" {
+  scope                = module.key_vault.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = module.app_service.app_service_principal_id
+
+  depends_on = [module.app_service]
+}
+
+# Add time delay to allow RBAC propagation
+resource "time_sleep" "rbac_propagation" {
+  depends_on = [azurerm_role_assignment.current_user_kv_secrets_officer]
+  
+  create_duration = "90s"
+  
+  triggers = {
+    role_assignment_id = azurerm_role_assignment.current_user_kv_secrets_officer.id
+    key_vault_id = module.key_vault.key_vault_id
+  }
 }
 
 #============================================================================
 # KEY VAULT SECRETS
 #============================================================================
 
-resource "azurerm_key_vault_secret" "jwt_secret" {
+resource "azurerm_key_vault_secret" "jwtsecret" {
   name         = "jwtsecret"
-  value        = var.jwt_secret
+  value        = var.jwtsecret
   key_vault_id = module.key_vault.key_vault_id
 
-  depends_on = [module.key_vault]
+  depends_on = [time_sleep.rbac_propagation]
 }
 
-resource "azurerm_key_vault_secret" "ddimitr_password" {
+resource "azurerm_key_vault_secret" "ddimitrpass" {
   name         = "ddimitrpass"
-  value        = var.ddimitr_password
+  value        = var.ddimitrpass
   key_vault_id = module.key_vault.key_vault_id
 
-  depends_on = [module.key_vault]
+  depends_on = [time_sleep.rbac_propagation]
 }
 
-resource "azurerm_key_vault_secret" "hello_password" {
+resource "azurerm_key_vault_secret" "hellopass" {
   name         = "hellopass"
-  value        = var.hello_password
+  value        = var.hellopass
   key_vault_id = module.key_vault.key_vault_id
 
-  depends_on = [module.key_vault]
+  depends_on = [time_sleep.rbac_propagation]
 }
 
 #============================================================================
@@ -182,8 +228,6 @@ module "app_service" {
   resource_group_name           = data.azurerm_resource_group.main.name
   nodejs_version               = "20-lts"
   subnet_id                    = module.virtual_network.subnet_ids["appservice"]
-  diagnostics_enabled          = var.diagnostics_enabled
-  log_analytics_workspace_id   = module.log_analytics_workspace.workspace_id
   tags                         = local.common_tags
 
   depends_on = [

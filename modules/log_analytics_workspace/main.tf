@@ -42,12 +42,6 @@ variable "retention_in_days" {
   default     = 30
 }
 
-variable "diagnostics_enabled" {
-  description = "Enable diagnostic settings for the workspace"
-  type        = bool
-  default     = false
-}
-
 variable "tags" {
   description = "Tags to apply to the Log Analytics workspace"
   type        = map(string)
@@ -65,22 +59,6 @@ resource "azurerm_log_analytics_workspace" "main" {
   sku                 = var.sku
   retention_in_days   = var.retention_in_days
   tags                = var.tags
-}
-
-# Self-monitoring diagnostic settings for the workspace
-resource "azurerm_monitor_diagnostic_setting" "workspace_diagnostics" {
-  count                      = var.diagnostics_enabled ? 1 : 0
-  name                       = "${var.workspace_name}-diagnostics"
-  target_resource_id         = azurerm_log_analytics_workspace.main.id
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
-
-  enabled_log {
-    category_group = "audit"
-  }
-
-  metric {
-    category = "AllMetrics"
-  }
 }
 
 #============================================================================

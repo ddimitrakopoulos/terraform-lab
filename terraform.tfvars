@@ -57,11 +57,6 @@ app_service_sku_name  = "B1"
 #============================================================================
 # SECRETS (Provide values at deployment time)
 #============================================================================
-# These should be provided via environment variables or secure input:
-# TF_VAR_jwt_secret = "your-jwt-secret"
-# TF_VAR_ddimitr_password = "your-ddimitr-password" 
-# TF_VAR_hello_password = "your-hello-password"
-
-jwt_secret       = ""
-ddimitr_password = ""
-hello_password   = ""
+jwtsecret       = ""
+ddimitrpass = ""
+hellopass   = ""

@@ -52,18 +52,6 @@ variable "subnet_id" {
   type        = string
 }
 
-variable "diagnostics_enabled" {
-  description = "Enable diagnostic settings for App Service resources"
-  type        = bool
-  default     = false
-}
-
-variable "log_analytics_workspace_id" {
-  description = "Resource ID of the Log Analytics workspace for diagnostic settings"
-  type        = string
-  default     = ""
-}
-
 variable "tags" {
   description = "Tags to apply to the App Service resources"
   type        = map(string)
@@ -103,10 +91,13 @@ resource "azurerm_linux_web_app" "main" {
     }
 
     app_command_line = ""
+    always_on = var.app_service_plan_sku_name == "F1" ? false : true
+    ftps_state = "Disabled"
+    minimum_tls_version = "1.2"
+    use_32_bit_worker = true
+    load_balancing_mode = "LeastRequests"
     
-
-    
-    vnet_route_all_enabled = true
+    vnet_route_all_enabled = var.app_service_plan_sku_name != "F1" ? true : false
   }
 
   app_settings = {
@@ -116,36 +107,8 @@ resource "azurerm_linux_web_app" "main" {
     "WEBSITE_DNS_SERVER"      = "168.63.129.16"
   }
 
-  # VNet integration
-  virtual_network_subnet_id = var.subnet_id
-}
-
-# App Service diagnostic settings
-resource "azurerm_monitor_diagnostic_setting" "app_service_diagnostics" {
-  count                      = var.diagnostics_enabled ? 1 : 0
-  name                       = "${var.app_service_name}-diagnostics"
-  target_resource_id         = azurerm_linux_web_app.main.id
-  log_analytics_workspace_id = var.log_analytics_workspace_id
-
-  enabled_log {
-    category_group = "allLogs"
-  }
-
-  metric {
-    category = "AllMetrics"
-  }
-}
-
-# App Service Plan diagnostic settings
-resource "azurerm_monitor_diagnostic_setting" "app_service_plan_diagnostics" {
-  count                      = var.diagnostics_enabled ? 1 : 0
-  name                       = "${var.app_service_plan_name}-diagnostics"
-  target_resource_id         = azurerm_service_plan.main.id
-  log_analytics_workspace_id = var.log_analytics_workspace_id
-
-  metric {
-    category = "AllMetrics"
-  }
+  # VNet integration (only if not F1)
+  virtual_network_subnet_id = var.app_service_plan_sku_name != "F1" ? var.subnet_id : null
 }
 
 #============================================================================

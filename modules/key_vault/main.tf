@@ -59,22 +59,22 @@ variable "enabled_for_template_deployment" {
   default     = false
 }
 
-variable "diagnostics_enabled" {
-  description = "Enable diagnostic settings for Key Vault"
-  type        = bool
-  default     = false
-}
-
-variable "log_analytics_workspace_id" {
-  description = "Resource ID of the Log Analytics workspace for diagnostic settings"
-  type        = string
-  default     = ""
-}
-
 variable "tags" {
   description = "Tags to apply to the Key Vault"
   type        = map(string)
   default     = {}
+}
+
+variable "temporary_public_access" {
+  description = "Temporarily enable public network access for provisioning (will set to true to allow Terraform RBAC propagation)."
+  type        = bool
+  default     = true
+}
+
+variable "allowed_subnet_ids" {
+  description = "List of subnet IDs allowed to access the Key Vault"
+  type        = list(string)
+  default     = []
 }
 
 #============================================================================
@@ -93,34 +93,16 @@ resource "azurerm_key_vault" "main" {
   enabled_for_template_deployment = var.enabled_for_template_deployment
 
   # Network settings
-  public_network_access_enabled = false
+  public_network_access_enabled = var.temporary_public_access
   
   network_acls {
-    default_action = "Deny"
-    bypass         = "AzureServices"
+    default_action             = "Deny"
+    bypass                     = "AzureServices"
+    ip_rules                   = var.temporary_public_access ? ["79.107.29.30", "45.66.41.106"] : []
+    virtual_network_subnet_ids = var.allowed_subnet_ids
   }
 
   tags = var.tags
-}
-
-# Key Vault diagnostic settings
-resource "azurerm_monitor_diagnostic_setting" "key_vault_diagnostics" {
-  count                      = var.diagnostics_enabled ? 1 : 0
-  name                       = "${azurerm_key_vault.main.name}-diagnostics"
-  target_resource_id         = azurerm_key_vault.main.id
-  log_analytics_workspace_id = var.log_analytics_workspace_id
-
-  enabled_log {
-    category = "AuditEvent"
-  }
-
-  enabled_log {
-    category = "AzurePolicyEvaluationDetails"
-  }
-
-  metric {
-    category = "AllMetrics"
-  }
 }
 
 #============================================================================

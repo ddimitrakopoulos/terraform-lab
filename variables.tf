@@ -210,21 +210,21 @@ variable "app_service_sku_name" {
 # SECRET VARIABLES
 #============================================================================
 
-variable "jwt_secret" {
+variable "jwtsecret" {
   description = "JWT secret for application authentication"
   type        = string
   sensitive   = true
   default     = ""
 }
 
-variable "ddimitr_password" {
+variable "ddimitrpass" {
   description = "Password for ddimitr user"
   type        = string
   sensitive   = true
   default     = ""
 }
 
-variable "hello_password" {
+variable "hellopass" {
   description = "Password for hello user"
   type        = string
   sensitive   = true
